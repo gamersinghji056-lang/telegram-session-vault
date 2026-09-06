@@ -27,3 +27,40 @@
 .composer{border-top:1px solid var(--border,#27364b);padding:12px;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
 .composer textarea{resize:none;min-height:44px;max-height:140px}.chatEmpty{padding:24px;text-align:center}
 @media(max-width:900px){.chatShell{grid-template-columns:1fr;height:auto;min-height:0}.chatListPane{border-right:0;border-bottom:1px solid var(--border,#27364b);max-height:330px}.conversationPane{min-height:620px}.messageBubble{max-width:88%}}
+/* FINAL_CHAT_SCROLL_FIX */
+.chatShell{
+  height:calc(100vh - 150px);
+  min-height:0 !important;
+  overflow:hidden !important;
+}
+.chatListPane,
+.conversationPane{
+  min-height:0 !important;
+  overflow:hidden !important;
+}
+.chatList{
+  min-height:0 !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  overscroll-behavior:contain;
+}
+.messageList{
+  min-height:0 !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+@media(max-width:900px){
+  .chatShell{
+    height:calc(100vh - 120px);
+    min-height:560px !important;
+  }
+  .chatListPane{
+    max-height:36vh;
+  }
+  .conversationPane{
+    min-height:0 !important;
+    height:55vh;
+  }
+}

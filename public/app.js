@@ -24,11 +24,16 @@ function toast(m){
 }
 
 function nav(){
-  document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.nav button').forEach(b=>b.onclick=async()=>{
     document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
     $('#'+b.dataset.target).classList.add('active');
+
+    // CHAT_LAZY_LOAD
+    if(b.dataset.target==='chats'){
+      await loadChats();
+    }
   });
 }
 
@@ -147,7 +152,6 @@ async function login(){
     $('#loginScreen').classList.add('hidden');
     $('#app').classList.remove('hidden');
     await start();
-    await loadChats();
     await resumePendingTelegramAuth();
   }catch(e){toast(e.message)}
 }
@@ -473,7 +477,7 @@ async function loadChats(silent=false){
   const q=$('#chatSearch')?.value.trim()||'';
   if(!silent)$('#chatList').innerHTML='<div class="muted chatEmpty">Loading chats...</div>';
   try{
-    const r=await api(`/api/accounts/${chatState.accountId}/chats?limit=120&q=${encodeURIComponent(q)}`);
+    const r=await api(`/api/accounts/${chatState.accountId}/chats?limit=40&q=${encodeURIComponent(q)}`);
     chatState.chats=r.chats||[];
     if(chatState.activeRef && !chatState.chats.some(c=>c.ref===chatState.activeRef)){
       chatState.activeRef='';chatState.messages=[];chatState.oldestId=0;
@@ -601,7 +605,6 @@ api('/api/me').then(async m=>{
     $('#loginScreen').classList.add('hidden');
     $('#app').classList.remove('hidden');
     await start();
-    await loadChats();
     await resumePendingTelegramAuth();
   }
 }).catch(()=>{});

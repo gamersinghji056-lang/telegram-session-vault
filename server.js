@@ -566,7 +566,7 @@ app.post('/api/telegram/auth/:id/cancel', auth, async (req, res) => {
 app.get('/api/accounts/:id/chats', auth, async (req, res) => {
   try {
     const { account, client } = await getAuthorizedTelegramAccount(req.params.id);
-    const limit = Math.min(Math.max(Number(req.query.limit || 80), 1), 200);
+    const limit = Math.min(Math.max(Number(req.query.limit || 40), 1), 80);
     const query = String(req.query.q || '').trim().toLowerCase();
 
     const dialogs = await client.getDialogs({ limit });
@@ -576,6 +576,17 @@ app.get('/api/accounts/:id/chats', auth, async (req, res) => {
     for (const dialog of dialogs || []) {
       const entity = dialog?.entity;
       if (!entity) continue;
+
+      // PRIVATE_USER_CHAT_FILTER
+      // Sync only 1-to-1 users, bots and Telegram service notifications.
+      // Groups, megagroups and broadcast channels are excluded.
+      const className = String(entity?.className || entity?.constructor?.name || '');
+      if (className !== 'User') continue;
+
+      const isBot = !!entity?.bot;
+      const isTelegramService =
+        String(entity?.id || '') === '777000' ||
+        String(entity?.username || '').toLowerCase() === 'telegram';
 
       const title = String(dialog?.title || entityTitle(entity));
       const username = entityUsername(entity);
@@ -596,7 +607,8 @@ app.get('/api/accounts/:id/chats', auth, async (req, res) => {
         archived: Number(dialog?.folderId || 0) === 1,
         date: asIsoDate(dialog?.date || dialog?.message?.date),
         preview,
-        entityType: String(entity?.className || entity?.constructor?.name || 'Chat')
+        entityType: String(entity?.className || entity?.constructor?.name || 'Chat'),
+        category: isTelegramService ? 'official' : (isBot ? 'bot' : 'personal')
       });
     }
 
@@ -613,7 +625,7 @@ app.get('/api/accounts/:id/chats/:ref/messages', auth, async (req, res) => {
     const chat = resolveChatRef(account.id, req.params.ref);
     if (!chat) return res.status(409).json({ error: 'CHAT_LIST_EXPIRED_REFRESH_REQUIRED' });
 
-    const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 100);
+    const limit = Math.min(Math.max(Number(req.query.limit || 40), 1), 80);
     const offsetId = Math.max(Number(req.query.offsetId || 0), 0);
 
     const params = { limit };
