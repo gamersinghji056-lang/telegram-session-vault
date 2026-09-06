@@ -1,0 +1,7 @@
+node_modules/
+.env
+npm-debug.log*
+.DS_Store
+# Keep the seed file, ignore runtime snapshots/backups
+/data/*.tmp
+/data/*.bak

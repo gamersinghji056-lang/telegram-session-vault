@@ -1,0 +1,32 @@
+{
+  "accounts": [
+    {
+      "id": "acc_demo_1",
+      "name": "Demo User",
+      "username": "@demo_user",
+      "phone": "+91 98765 43210",
+      "telegramId": "7000000001",
+      "premium": true,
+      "avatar": "DU",
+      "status": "ACTIVE",
+      "country": "IN",
+      "region": "Mumbai",
+      "networkMode": "Sticky Static Egress",
+      "egressLabel": "IN-MUM-DEMO-01",
+      "egressIp": "203.0.113.24",
+      "worker": "wrk-in-mumbai-01",
+      "createdAt": "2026-09-06T15:00:00.000Z",
+      "lastHealthCheck": "2026-09-06T15:00:00.000Z",
+      "consent": true
+    }
+  ],
+  "codes": [],
+  "audit": [
+    {
+      "id": "audit_seed",
+      "time": "2026-09-06T15:00:00.000Z",
+      "title": "Demo vault initialized",
+      "text": "Safe demo data loaded. No real Telegram credentials or login codes are collected."
+    }
+  ]
+}
