@@ -13,7 +13,7 @@
     <h2>Console Login</h2>
     <p class="muted">Use the ADMIN_USERNAME and ADMIN_PASSWORD configured on Railway.</p>
     <div class="field"><label>Username</label><input id="loginUser" value="admin"></div>
-    <div class="field"><label>Password</label><input id="loginPass" type="password" value="change-this-password"></div>
+    <div class="field"><label>Password</label><input id="loginPass" type="password"></div>
     <button class="btn primary" style="width:100%" id="loginBtn">Enter Dashboard</button>
   </div>
 </div>
@@ -54,12 +54,12 @@
     </section>
 
     <section id="codes" class="section">
-      <div class="topbar"><div><h2>Mock Code Tests</h2><p>This page is only for UI testing. Real Telegram login codes are never stored or displayed here.</p></div><div class="actions"><button class="btn primary" onclick="simulateCode()">Generate Mock Code</button><button class="btn danger" onclick="clearCodes()">Clear</button></div></div>
+      <div class="topbar"><div><h2>Mock Code Tests</h2><p>UI testing only. Real Telegram login codes are never stored or displayed here.</p></div><div class="actions"><button class="btn primary" onclick="simulateCode()">Generate Mock Code</button><button class="btn danger" onclick="clearCodes()">Clear</button></div></div>
       <div class="tgbox"><div class="tghead"><div class="serviceAvatar">TG</div><div><b>Simulation</b><span class="muted">Not real Telegram login data</span></div></div><div class="chatArea" id="codeInbox"></div></div>
     </section>
 
     <section id="network" class="section">
-      <div class="topbar"><div><h2>Network Profiles</h2><p>Shows the hosting runtime used by each stored session. No device/IP impersonation is performed.</p></div></div>
+      <div class="topbar"><div><h2>Network Profiles</h2><p>Shows the hosting runtime used by each stored session. No device or IP impersonation is performed.</p></div></div>
       <div class="card"><table><thead><tr><th>Account</th><th>Country/Region</th><th>Mode</th><th>Egress Label</th><th>Runtime IP</th></tr></thead><tbody id="networkRows"></tbody></table></div>
     </section>
 
@@ -86,18 +86,18 @@
 <div id="addModal" class="modal hidden">
   <div class="modalbox">
     <h3>Connect Telegram Account</h3>
-    <p class="muted">The account owner must complete Telegram's login challenge themselves.</p>
+    <p class="muted">The account owner must complete Telegram's normal login challenge.</p>
 
     <div id="authStartStep" class="formgrid">
       <div class="field"><label>Display name (optional)</label><input id="fName" placeholder="Account name"></div>
       <div class="field"><label>Phone in E.164 format</label><input id="fPhone" placeholder="+919876543210"></div>
       <div class="field"><label>Country</label><select id="fCountry"><option value="IN">India</option><option value="AE">UAE</option><option value="GB">UK</option></select></div>
       <div class="field"><label>Region</label><input id="fRegion" value="Mumbai"></div>
-      <div class="full notice">By continuing, you confirm the Telegram account owner has explicitly approved this connection. Telegram-side logout/revocation remains effective.</div>
+      <div class="full notice">By continuing, you confirm the Telegram account owner has explicitly approved this connection. Telegram logout and revocation remain effective.</div>
     </div>
 
     <div id="authCodeStep" class="hidden">
-      <div class="notice">Telegram sent a login code using its normal delivery method. Enter that code here. It is passed directly to Telegram and is not stored.</div>
+      <div class="notice">Telegram has requested the login code. Check the account owner's normal Telegram login-code delivery and enter the code below. The code is not stored.</div>
       <div class="field" style="margin-top:14px"><label>Telegram login code</label><input id="fCode" inputmode="numeric" autocomplete="one-time-code" placeholder="12345"></div>
     </div>
 
@@ -107,7 +107,8 @@
     </div>
 
     <div id="authProgressStep" class="hidden">
-      <div class="notice">Waiting for Telegramâ€¦ <span id="authStageText">STARTING</span></div>
+      <div class="notice">Telegram login progress: <b id="authStageText">STARTING</b></div>
+      <div id="authErrorText" class="muted" style="margin-top:8px"></div>
     </div>
 
     <div class="actions" style="margin-top:16px">

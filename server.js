@@ -56,6 +56,14 @@ function broadcast(type, payload) {
   for (const res of clients) res.write(msg);
 }
 
+function withTimeout(promise, ms, code) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(code)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 function safeError(err) {
   const text = String(err?.errorMessage || err?.message || err || 'UNKNOWN_ERROR');
   return text.replace(/\b\d{4,10}\b/g, '[redacted]').slice(0, 240);
@@ -278,15 +286,28 @@ app.post('/api/telegram/auth/start', auth, async (req, res) => {
 
     (async () => {
       try {
-        await client.start({
-          phoneNumber: async () => phone,
-          phoneCode: async () => await waitForInput(flow, 'CODE_REQUIRED'),
-          password: async () => await waitForInput(flow, 'PASSWORD_REQUIRED'),
+        flow.stage = 'CONNECTING';
+        flow.updatedAt = new Date().toISOString();
+
+        await withTimeout(client.start({
+          phoneNumber: async () => {
+            flow.stage = 'REQUESTING_CODE';
+            flow.updatedAt = new Date().toISOString();
+            return phone;
+          },
+          phoneCode: async () => {
+            flow.error = null;
+            return await waitForInput(flow, 'CODE_REQUIRED');
+          },
+          password: async () => {
+            flow.error = null;
+            return await waitForInput(flow, 'PASSWORD_REQUIRED');
+          },
           onError: (err) => {
             flow.error = safeError(err);
             flow.updatedAt = new Date().toISOString();
           }
-        });
+        }), 45000, 'TELEGRAM_CONNECT_TIMEOUT');
 
         if (!await client.checkAuthorization()) {
           throw new Error('TELEGRAM_AUTH_NOT_AUTHORIZED');
@@ -350,6 +371,7 @@ app.post('/api/telegram/auth/start', auth, async (req, res) => {
         flow.stage = flow.cancelled ? 'CANCELLED' : 'ERROR';
         flow.error = safeError(err);
         flow.updatedAt = new Date().toISOString();
+        console.error('[telegram-auth]', flow.error);
         try { await client.disconnect(); } catch {}
       }
     })();

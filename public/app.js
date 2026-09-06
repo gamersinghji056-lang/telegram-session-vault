@@ -19,7 +19,7 @@ function toast(m){
   const t=$('#toast');
   t.textContent=m;
   t.classList.remove('hidden');
-  setTimeout(()=>t.classList.add('hidden'),2600);
+  setTimeout(()=>t.classList.add('hidden'),3000);
 }
 
 function nav(){
@@ -32,7 +32,8 @@ function nav(){
 }
 
 function identity(a){
-  return `<div class="accountCell"><div class="avatar">${esc(a.avatar||'TG')}</div><div><div class="accountName">${esc(a.name)}${a.premium?'<span class="premium" title="Telegram Premium">â˜…</span>':''}</div><div class="muted">${esc(a.username||'')} â€¢ ${esc(a.phone)}</div></div></div>`;
+  const premium=a.premium?'<span class="soft">Premium</span>':'';
+  return `<div class="accountCell"><div class="avatar">${esc(a.avatar||'TG')}</div><div><div class="accountName">${esc(a.name)} ${premium}</div><div class="muted">${esc(a.username||'')} | ${esc(a.phone)}</div></div></div>`;
 }
 
 function tag(s){
@@ -58,7 +59,7 @@ function render(){
 
   const cn=$('#configNotice');
   if(!config.telegramConfigured){
-    cn.textContent='Real Telegram login is not configured yet. Add TELEGRAM_API_ID, TELEGRAM_API_HASH and a 32+ character SESSION_ENCRYPTION_KEY in Railway Variables, then redeploy.';
+    cn.textContent='Real Telegram login is not configured. Check TELEGRAM_API_ID, TELEGRAM_API_HASH and SESSION_ENCRYPTION_KEY in Railway Variables, then redeploy.';
     cn.classList.remove('hidden');
   }else{
     cn.classList.add('hidden');
@@ -78,10 +79,10 @@ function render(){
 
   $('#sessionCards').innerHTML=state.accounts.map(a=>`<div class="card span6">
     <div class="profileHero"><div class="avatar">${esc(a.avatar||'TG')}</div><div>
-      <div class="accountName" style="font-size:18px">${esc(a.name)}${a.premium?'<span class="premium">â˜…</span>':''}</div>
-      <div class="muted">${esc(a.username)} â€¢ ${esc(a.phone)}</div>
+      <div class="accountName" style="font-size:18px">${esc(a.name)} ${a.premium?'<span class="soft">Premium</span>':''}</div>
+      <div class="muted">${esc(a.username)} | ${esc(a.phone)}</div>
       <div class="profileMeta">
-        <span class="soft">TG ID ${esc(a.telegramId||'â€”')}</span>
+        <span class="soft">TG ID ${esc(a.telegramId||'N/A')}</span>
         <span class="soft">${esc(a.authMode||'DEMO')}</span>
         <span class="soft">${esc(a.country)}/${esc(a.region)}</span>
       </div>
@@ -109,17 +110,13 @@ function render(){
 
   $('#codeInbox').innerHTML=state.codes.length?state.codes.map(c=>{
     const a=state.accounts.find(x=>x.id===c.accountId)||{};
-    return `<div class="bubble"><small>Simulation â€¢ ${esc(dt(c.createdAt))} â€¢ ${esc(a.name||'Unknown')}</small>
+    return `<div class="bubble"><small>Simulation | ${esc(dt(c.createdAt))} | ${esc(a.name||'Unknown')}</small>
       <div style="margin-top:7px">Mock login-code UI event</div>
       <div class="otp">${esc(c.code)}</div>
       <small>SIMULATED ONLY</small></div>`;
   }).join(''):'<div class="muted">No mock code events.</div>';
 
   $('#timeline').innerHTML=state.audit.map(e=>`<div class="event"><time>${esc(dt(e.time))}</time><div><b>${esc(e.title)}</b><p class="muted">${esc(e.text)}</p></div></div>`).join('')||'<div class="muted">No audit entries.</div>';
-}
-
-function go(id){
-  document.querySelector(`[data-target="${id}"]`)?.click();
 }
 
 async function login(){
@@ -155,6 +152,7 @@ function resetAuthModal(){
   $('#sendCodeBtn').classList.remove('hidden');
   $('#submitCodeBtn').classList.add('hidden');
   $('#submitPasswordBtn').classList.add('hidden');
+  $('#authErrorText').textContent='';
   $('#fCode').value='';
   $('#f2fa').value='';
 }
@@ -194,7 +192,7 @@ async function startTelegramAuth(){
     $('#sendCodeBtn').classList.add('hidden');
     $('#authProgressStep').classList.remove('hidden');
     $('#authStageText').textContent=r.stage;
-    authPoll=setInterval(pollAuth,900);
+    authPoll=setInterval(pollAuth,800);
     await pollAuth();
   }catch(e){toast(e.message)}
 }
@@ -204,6 +202,7 @@ async function pollAuth(){
   try{
     const s=await api(`/api/telegram/auth/${authFlowId}/status`);
     $('#authStageText').textContent=s.stage;
+    $('#authErrorText').textContent=s.error||'';
 
     if(s.stage==='CODE_REQUIRED'){
       $('#authProgressStep').classList.add('hidden');
@@ -217,7 +216,7 @@ async function pollAuth(){
       $('#authPasswordStep').classList.remove('hidden');
       $('#submitCodeBtn').classList.add('hidden');
       $('#submitPasswordBtn').classList.remove('hidden');
-    }else if(s.stage==='PROCESSING'||s.stage==='STARTING'){
+    }else if(['STARTING','CONNECTING','REQUESTING_CODE','PROCESSING'].includes(s.stage)){
       $('#authProgressStep').classList.remove('hidden');
       $('#authCodeStep').classList.add('hidden');
       $('#authPasswordStep').classList.add('hidden');
@@ -234,11 +233,14 @@ async function pollAuth(){
     }else if(s.stage==='ERROR'||s.stage==='CANCELLED'){
       clearInterval(authPoll);
       authPoll=null;
+      $('#authProgressStep').classList.remove('hidden');
+      $('#authErrorText').textContent=s.error||s.stage;
       toast(s.error||s.stage);
     }
   }catch(e){
     clearInterval(authPoll);
     authPoll=null;
+    $('#authErrorText').textContent=e.message;
     toast(e.message);
   }
 }
