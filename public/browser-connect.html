@@ -1,0 +1,93 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Browser Direct Telegram | Session Vault</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body{background:#0b1020;color:#edf2ff}
+    .browserWrap{max-width:1180px;margin:0 auto;padding:28px}
+    .browserGrid{display:grid;grid-template-columns:360px 1fr;gap:18px}
+    .panel{background:#11182a;border:1px solid #27314c;border-radius:18px;padding:18px}
+    .accountItem{padding:12px;border:1px solid #27314c;border-radius:12px;margin:10px 0}
+    .accountTop{display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .noticeItem{padding:12px;border-bottom:1px solid #27314c}
+    .statusDot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:#8b95aa}
+    .statusDot.online{background:#38d996}.statusDot.busy{background:#ffc857}.statusDot.error{background:#ff6b7a}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .browserWrap input{width:100%;box-sizing:border-box}
+    .small{font-size:12px}
+    .warnBox{background:#211d0e;border:1px solid #6d5c16;border-radius:12px;padding:12px;margin-bottom:16px}
+    .localModal{position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:9999}
+    .localModal.hidden{display:none}.localBox{width:min(440px,92vw);background:#11182a;border:1px solid #27314c;border-radius:18px;padding:20px}
+    @media(max-width:850px){.browserGrid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="browserWrap">
+  <div class="topbar">
+    <div>
+      <h2>Browser Direct Telegram</h2>
+      <p>Telegram MTProto connections originate from this browser/network, not Railway.</p>
+    </div>
+    <div class="toolbar">
+      <a class="btn ghost" href="/">Dashboard</a>
+      <button id="reconnectAll" class="btn primary">Reconnect saved accounts</button>
+    </div>
+  </div>
+
+  <div class="warnBox small">
+    Telegram authorization stays in this browser's IndexedDB. Login code and 2FA are entered locally and are not sent to Railway.
+    Telegram will see the public network path used by this browser; VPN, corporate proxy, CGNAT or ISP gateways can affect that IP.
+  </div>
+
+  <div class="browserGrid">
+    <div class="panel">
+      <h3>Telegram application credentials</h3>
+      <p class="muted small">Use one Telegram API application for your authorized accounts. These two values are kept only for this browser tab.</p>
+
+      <div class="field"><label>API ID</label><input id="apiId" inputmode="numeric" placeholder="123456"></div>
+      <div class="field"><label>API Hash</label><input id="apiHash" type="password" autocomplete="off" placeholder="Telegram API hash"></div>
+
+      <div class="toolbar">
+        <button id="saveCreds" class="btn">Use for this tab</button>
+        <button id="addAccount" class="btn primary">+ Connect account</button>
+      </div>
+
+      <hr style="border-color:#27314c;margin:18px 0">
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">Accounts</h3><span id="count" class="soft">0 / 100</span>
+      </div>
+      <div id="accounts"></div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <div>
+          <h3 style="margin-bottom:4px">Telegram security notices</h3>
+          <p class="muted small">Only incoming messages from Telegram service account 777000 are shown.</p>
+        </div>
+        <button id="clearNotices" class="btn ghost">Clear</button>
+      </div>
+      <div id="notices"><div class="muted">No service notices received in this browser yet.</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="localPrompt" class="localModal hidden">
+  <div class="localBox">
+    <h3 id="localPromptTitle">Telegram</h3>
+    <p id="localPromptHelp" class="muted"></p>
+    <div class="field"><input id="localPromptInput" autocomplete="off"></div>
+    <div class="toolbar">
+      <button id="localPromptCancel" class="btn ghost">Cancel</button>
+      <button id="localPromptOk" class="btn primary">Continue</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/browser-connect.js"></script>
+</body>
+</html>
