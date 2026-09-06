@@ -448,7 +448,7 @@ app.get('/api/accounts/:id/telegram-devices', auth, async (req, res) => {
     const client = await restoreTelegramClient(account);
     if (!client) return res.status(409).json({ error: 'REAUTH_REQUIRED' });
 
-    const result = await client.api.getAuthorizations();
+    const result = await client.getAuthorizations();
     const refs = new Map();
 
     const devices = (result?.authorizations || []).map((a) => {
@@ -504,7 +504,7 @@ app.post('/api/accounts/:id/telegram-devices/:ref/terminate', auth, async (req, 
     if (!client) return res.status(409).json({ error: 'REAUTH_REQUIRED' });
 
     // Telegram itself enforces what can/cannot be terminated.
-    await client.api.resetAuthorization({ hash });
+    await client.resetAuthorization(hash);
 
     deviceAuthorizationRefs.delete(account.id);
     store.update(state => {
