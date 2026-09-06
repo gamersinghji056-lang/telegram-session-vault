@@ -25,7 +25,7 @@
       <button class="active" data-target="dashboard">Dashboard</button>
       <button data-target="sessions">Sessions</button>
       <button data-target="devices">Telegram Devices</button>
-      <button data-target="codes">Mock Code Tests</button>
+      <button data-target="codes">Login Challenges</button>
       <button data-target="network">Network</button>
       <button data-target="health">Health & Recovery</button>
       <button data-target="audit">Audit</button>
@@ -75,10 +75,25 @@
         </div>
       </div>
     </section>
-
     <section id="codes" class="section">
-      <div class="topbar"><div><h2>Mock Code Tests</h2><p>UI testing only. Real Telegram login codes are never stored or displayed here.</p></div><div class="actions"><button class="btn primary" onclick="simulateCode()">Generate Mock Code</button><button class="btn danger" onclick="clearCodes()">Clear</button></div></div>
-      <div class="tgbox"><div class="tghead"><div class="serviceAvatar">TG</div><div><b>Simulation</b><span class="muted">Not real Telegram login data</span></div></div><div class="chatArea" id="codeInbox"></div></div>
+      <div class="topbar">
+        <div>
+          <h2>Login Challenges</h2>
+          <p>Per-user Telegram authorization status. Real login codes and 2FA passwords are never captured, stored, or shown here.</p>
+        </div>
+        <div class="actions">
+          <button class="btn primary" onclick="loadLoginChallenges()">Refresh</button>
+        </div>
+      </div>
+      <div class="tgbox">
+        <div class="tghead">
+          <div class="serviceAvatar">TG</div>
+          <div><b>Telegram Authorization</b><span class="muted">Account-owner challenge status</span></div>
+        </div>
+        <div class="chatArea" id="codeInbox">
+          <div class="muted">Click Refresh to see active per-user login challenges.</div>
+        </div>
+      </div>
     </section>
 
     <section id="network" class="section">

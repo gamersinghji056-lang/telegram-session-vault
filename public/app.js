@@ -116,14 +116,11 @@ function render(){
       ${a.status==='REAUTH_REQUIRED'?`<button class="btn primary" onclick="reconnect('${a.id}')">User Re-auth</button>`:''}
     </div>
   </div>`).join('')||'<div class="card span12 muted">No accounts.</div>';
+  const codeInbox=$('#codeInbox');
+  if(codeInbox && !codeInbox.dataset.loaded){
+    codeInbox.innerHTML='<div class="muted">Click Refresh to see active per-user login challenges.</div>';
+  }
 
-  $('#codeInbox').innerHTML=state.codes.length?state.codes.map(c=>{
-    const a=state.accounts.find(x=>x.id===c.accountId)||{};
-    return `<div class="bubble"><small>Simulation | ${esc(dt(c.createdAt))} | ${esc(a.name||'Unknown')}</small>
-      <div style="margin-top:7px">Mock login-code UI event</div>
-      <div class="otp">${esc(c.code)}</div>
-      <small>SIMULATED ONLY</small></div>`;
-  }).join(''):'<div class="muted">No mock code events.</div>';
 
   $('#timeline').innerHTML=state.audit.map(e=>`<div class="event"><time>${esc(dt(e.time))}</time><div><b>${esc(e.title)}</b><p class="muted">${esc(e.text)}</p></div></div>`).join('')||'<div class="muted">No audit entries.</div>';
 }
@@ -378,6 +375,43 @@ async function terminateTelegramDevice(accountId,ref,deviceName){
   }catch(e){toast(e.message)}
 }
 
+
+async function loadLoginChallenges(){
+  const box=$('#codeInbox');
+  if(!box)return;
+
+  box.dataset.loaded='1';
+  box.innerHTML='<div class="muted">Loading login challenges...</div>';
+
+  try{
+    const r=await api('/api/telegram/auth-flows');
+    const flows=r.flows||[];
+
+    if(!flows.length){
+      box.innerHTML='<div class="muted">No active Telegram login challenges.</div>';
+      return;
+    }
+
+    box.innerHTML=flows.map(f=>`<div class="bubble">
+      <small>${esc(f.name)} | ${esc(f.phone)} | ${esc(dt(f.updatedAt))}</small>
+      <div style="margin-top:8px"><b>${esc(f.stage)}</b></div>
+      ${f.error?`<div class="muted" style="margin-top:6px">${esc(f.error)}</div>`:''}
+      <div style="margin-top:10px">
+        ${f.stage==='CODE_REQUIRED'
+          ? '<span class="soft">Waiting for the account owner to enter the Telegram login code in the secure Connect Telegram dialog.</span>'
+          : f.stage==='PASSWORD_REQUIRED'
+          ? '<span class="soft">Waiting for the account owner to enter the Telegram 2FA password in the secure Connect Telegram dialog.</span>'
+          : f.stage==='AUTHORIZED'
+          ? '<span class="tag green">AUTHORIZED</span>'
+          : '<span class="muted">Telegram authorization is processing.</span>'
+        }
+      </div>
+    </div>`).join('');
+  }catch(e){
+    box.innerHTML=`<div class="muted">${esc(e.message)}</div>`;
+    toast(e.message);
+  }
+}
 async function health(id){
   try{
     await api(`/api/accounts/${id}/health`,{method:'POST'});

@@ -383,6 +383,18 @@ app.post('/api/telegram/auth/start', auth, async (req, res) => {
   }
 });
 
+app.get('/api/telegram/auth-flows', auth, (_req, res) => {
+  const flows = Array.from(pendingAuth.values()).map(flow => ({
+    authId: flow.id,
+    name: flow.name || 'Telegram user',
+    phone: String(flow.phone || '').replace(/^(\+\d{2,4})\d+(\d{3})$/, '$1******$2'),
+    stage: flow.stage,
+    error: flow.error || null,
+    updatedAt: flow.updatedAt,
+    accountId: flow.accountId || null
+  }));
+  res.json({ flows });
+});
 app.get('/api/telegram/auth/:id/status', auth, (req, res) => {
   const flow = getFlow(req.params.id);
   if (!flow) return res.status(404).json({ error: 'AUTH_FLOW_NOT_FOUND' });
