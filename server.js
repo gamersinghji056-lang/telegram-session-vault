@@ -5,6 +5,7 @@ const session = require('express-session');
 const helmet = require('helmet');
 const { TelegramClient } = require('teleproto');
 const { StringSession } = require('teleproto/sessions');
+const { NewMessage } = require('teleproto/events');
 const { JsonStore } = require('./src/store');
 const { makeMockCode } = require('./src/mock-events');
 
@@ -16,6 +17,8 @@ const clients = new Set();
 const telegramClients = new Map();
 const pendingAuth = new Map();
 const deviceAuthorizationRefs = new Map();
+const telegramChatRefs = new Map();
+const telegramMessageHandlers = new Set();
 
 const API_ID = Number(process.env.TELEGRAM_API_ID || 0);
 const API_HASH = String(process.env.TELEGRAM_API_HASH || '');
@@ -186,9 +189,121 @@ async function restoreTelegramClient(account) {
     return null;
   }
   telegramClients.set(account.id, client);
+  ensureTelegramMessageHandler(account.id, client);
   return client;
 }
 
+function asIsoDate(value) {
+  if (!value) return null;
+  try {
+    if (value instanceof Date) return value.toISOString();
+    const n = Number(value);
+    if (Number.isFinite(n)) return new Date(n < 100000000000 ? n * 1000 : n).toISOString();
+    return new Date(value).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function entityTitle(entity, fallback = 'Telegram Chat') {
+  if (!entity) return fallback;
+  const full = [entity.firstName, entity.lastName].filter(Boolean).join(' ').trim();
+  return String(entity.title || full || entity.username || fallback);
+}
+
+function entityUsername(entity) {
+  return entity?.username ? `@${entity.username}` : '';
+}
+
+function messageText(message) {
+  const text = String(message?.message || message?.text || '');
+  if (text) return text;
+  if (message?.media) {
+    const kind = String(message.media?.className || message.media?.constructor?.name || 'Media')
+      .replace(/^MessageMedia/, '');
+    return `[${kind || 'Media'}]`;
+  }
+  return '';
+}
+
+function senderLabel(message) {
+  const sender = message?.sender;
+  if (sender) {
+    const title = entityTitle(sender, '');
+    if (title) return title;
+  }
+  if (message?.senderId !== undefined && message?.senderId !== null) return String(message.senderId);
+  return '';
+}
+
+function serializeMessage(message) {
+  return {
+    id: Number(message?.id || 0),
+    text: messageText(message),
+    outgoing: !!message?.out,
+    date: asIsoDate(message?.date),
+    sender: senderLabel(message),
+    replyToMsgId: Number(message?.replyTo?.replyToMsgId || message?.replyToMsgId || 0) || null,
+    edited: !!message?.editDate,
+    editDate: asIsoDate(message?.editDate),
+    hasMedia: !!message?.media,
+    mediaType: message?.media
+      ? String(message.media?.className || message.media?.constructor?.name || 'Media').replace(/^MessageMedia/, '')
+      : null
+  };
+}
+
+function getChatCache(accountId) {
+  const cache = telegramChatRefs.get(accountId);
+  if (!cache) return null;
+  if (Date.now() - cache.createdAt > 30 * 60 * 1000) {
+    telegramChatRefs.delete(accountId);
+    return null;
+  }
+  return cache;
+}
+
+function resolveChatRef(accountId, ref) {
+  const cache = getChatCache(accountId);
+  if (!cache) return null;
+  return cache.refs.get(ref) || null;
+}
+
+function ensureTelegramMessageHandler(accountId, client) {
+  if (!client || telegramMessageHandlers.has(accountId)) return;
+
+  const handler = async (event) => {
+    try {
+      const msg = event?.message;
+      if (!msg) return;
+
+      broadcast('telegram-message', {
+        accountId,
+        messageId: Number(msg.id || 0),
+        outgoing: !!msg.out,
+        date: asIsoDate(msg.date)
+      });
+    } catch (err) {
+      console.error('[telegram-message-event]', safeError(err));
+    }
+  };
+
+  client.addEventHandler(handler, new NewMessage({}));
+  telegramMessageHandlers.add(accountId);
+}
+
+async function getAuthorizedTelegramAccount(accountId) {
+  const account = store.read().accounts.find(a => a.id === accountId);
+  if (!account) throw new Error('ACCOUNT_NOT_FOUND');
+  if (account.authMode !== 'REAL_TELEGRAM') throw new Error('REAL_TELEGRAM_SESSION_REQUIRED');
+  if (account.status !== 'ACTIVE') throw new Error('REAUTH_REQUIRED');
+
+  const client = await restoreTelegramClient(account);
+  if (!client || !await client.checkAuthorization()) throw new Error('REAUTH_REQUIRED');
+
+  ensureTelegramMessageHandler(account.id, client);
+  return { account, client };
+}
 async function setAccountHealth(accountId) {
   let account = store.read().accounts.find(a => a.id === accountId);
   if (!account) return null;
@@ -363,6 +478,7 @@ app.post('/api/telegram/auth/start', auth, async (req, res) => {
         });
 
         telegramClients.set(accountId, client);
+        ensureTelegramMessageHandler(accountId, client);
         flow.stage = 'AUTHORIZED';
         flow.accountId = accountId;
         flow.error = null;
@@ -446,6 +562,110 @@ app.post('/api/telegram/auth/:id/cancel', auth, async (req, res) => {
 });
 
 
+// Telegram chat client routes for explicitly connected accounts.
+app.get('/api/accounts/:id/chats', auth, async (req, res) => {
+  try {
+    const { account, client } = await getAuthorizedTelegramAccount(req.params.id);
+    const limit = Math.min(Math.max(Number(req.query.limit || 80), 1), 200);
+    const query = String(req.query.q || '').trim().toLowerCase();
+
+    const dialogs = await client.getDialogs({ limit });
+    const refs = new Map();
+    const chats = [];
+
+    for (const dialog of dialogs || []) {
+      const entity = dialog?.entity;
+      if (!entity) continue;
+
+      const title = String(dialog?.title || entityTitle(entity));
+      const username = entityUsername(entity);
+      const preview = messageText(dialog?.message);
+      const haystack = `${title} ${username} ${preview}`.toLowerCase();
+      if (query && !haystack.includes(query)) continue;
+
+      const ref = crypto.randomUUID();
+      refs.set(ref, { entity, title, username });
+
+      chats.push({
+        ref,
+        title,
+        username,
+        unreadCount: Number(dialog?.unreadCount || 0),
+        unreadMentionsCount: Number(dialog?.unreadMentionsCount || 0),
+        pinned: !!dialog?.pinned,
+        archived: Number(dialog?.folderId || 0) === 1,
+        date: asIsoDate(dialog?.date || dialog?.message?.date),
+        preview,
+        entityType: String(entity?.className || entity?.constructor?.name || 'Chat')
+      });
+    }
+
+    telegramChatRefs.set(account.id, { createdAt: Date.now(), refs });
+    res.json({ accountId: account.id, chats });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
+app.get('/api/accounts/:id/chats/:ref/messages', auth, async (req, res) => {
+  try {
+    const { account, client } = await getAuthorizedTelegramAccount(req.params.id);
+    const chat = resolveChatRef(account.id, req.params.ref);
+    if (!chat) return res.status(409).json({ error: 'CHAT_LIST_EXPIRED_REFRESH_REQUIRED' });
+
+    const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 100);
+    const offsetId = Math.max(Number(req.query.offsetId || 0), 0);
+
+    const params = { limit };
+    if (offsetId > 0) params.offsetId = offsetId;
+
+    const messages = await client.getMessages(chat.entity, params);
+    const serialized = (messages || []).map(serializeMessage).reverse();
+
+    res.json({
+      accountId: account.id,
+      chat: { ref: req.params.ref, title: chat.title, username: chat.username },
+      messages: serialized,
+      hasMore: (messages || []).length >= limit
+    });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
+app.post('/api/accounts/:id/chats/:ref/messages', auth, async (req, res) => {
+  try {
+    const { account, client } = await getAuthorizedTelegramAccount(req.params.id);
+    const chat = resolveChatRef(account.id, req.params.ref);
+    if (!chat) return res.status(409).json({ error: 'CHAT_LIST_EXPIRED_REFRESH_REQUIRED' });
+
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'MESSAGE_REQUIRED' });
+    if (text.length > 4096) return res.status(400).json({ error: 'MESSAGE_TOO_LONG' });
+
+    const replyTo = Number(req.body?.replyTo || 0);
+    const params = { message: text };
+    if (replyTo > 0) params.replyTo = replyTo;
+
+    const sent = await client.sendMessage(chat.entity, params);
+    res.json({ ok: true, message: serializeMessage(sent) });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
+app.post('/api/accounts/:id/chats/:ref/read', auth, async (req, res) => {
+  try {
+    const { account, client } = await getAuthorizedTelegramAccount(req.params.id);
+    const chat = resolveChatRef(account.id, req.params.ref);
+    if (!chat) return res.status(409).json({ error: 'CHAT_LIST_EXPIRED_REFRESH_REQUIRED' });
+
+    await client.markAsRead(chat.entity);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
 // Telegram authorized-device management.
 // Only works after this vault has been explicitly authorized by the account owner.
 // Raw Telegram authorization hashes never leave the server.

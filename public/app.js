@@ -3,6 +3,7 @@ let config={telegramConfigured:false};
 let es=null;
 let authFlowId=sessionStorage.getItem('telegramAuthFlowId')||null;
 let authPoll=null;
+let chatState={accountId:'',chats:[],activeRef:'',messages:[],oldestId:0,replyTo:0,loading:false};
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -58,6 +59,21 @@ function render(){
   $('#mHealthy').textContent=healthy;
   $('#mReauth').textContent=reauth;
 
+  const chatAccountSelect=$('#chatAccountSelect');
+  if(chatAccountSelect){
+    const previous=chatAccountSelect.value || chatState.accountId;
+    const real=state.accounts.filter(a=>a.authMode==='REAL_TELEGRAM' && a.status==='ACTIVE');
+    chatAccountSelect.innerHTML=real.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} | ${esc(a.phone)}</option>`).join('');
+    if(real.some(a=>a.id===previous)){
+      chatAccountSelect.value=previous;
+      chatState.accountId=previous;
+    }else if(real[0]){
+      chatAccountSelect.value=real[0].id;
+      chatState.accountId=real[0].id;
+    }else{
+      chatState.accountId='';
+    }
+  }
   const deviceSelect=$('#deviceAccountSelect');
   if(deviceSelect){
     const previous=deviceSelect.value;
@@ -131,6 +147,7 @@ async function login(){
     $('#loginScreen').classList.add('hidden');
     $('#app').classList.remove('hidden');
     await start();
+    await loadChats();
     await resumePendingTelegramAuth();
   }catch(e){toast(e.message)}
 }
@@ -146,6 +163,15 @@ async function start(){
   es=new EventSource('/api/events');
   es.addEventListener('code',async()=>{await load();toast('New mock event received')});
   es.addEventListener('state',load);
+  es.addEventListener('telegram-message',async e=>{
+    try{
+      const evt=JSON.parse(e.data||'{}');
+      if(evt.accountId===chatState.accountId){
+        await loadChats(true);
+        if(chatState.activeRef)await loadMessages(chatState.activeRef,true);
+      }
+    }catch{}
+  });
 }
 
 function resetAuthModal(){
@@ -412,6 +438,125 @@ async function loadLoginChallenges(){
     toast(e.message);
   }
 }
+
+function initials(name){
+  return String(name||'TG').trim().split(/\s+/).map(x=>x[0]||'').join('').slice(0,2).toUpperCase()||'TG';
+}
+function shortTime(v){
+  if(!v)return '';
+  try{
+    const d=new Date(v), now=new Date();
+    if(d.toDateString()===now.toDateString())return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    return d.toLocaleDateString([],{month:'short',day:'numeric'});
+  }catch{return ''}
+}
+function renderChatList(){
+  const box=$('#chatList');
+  if(!box)return;
+  if(!chatState.chats.length){box.innerHTML='<div class="muted chatEmpty">No chats found.</div>';return;}
+  box.innerHTML=chatState.chats.map(c=>`<button class="chatItem ${c.ref===chatState.activeRef?'active':''}" onclick="openChat('${c.ref}')">
+    <span class="chatAvatar">${esc(initials(c.title))}</span>
+    <span class="chatMain">
+      <span class="chatTitleRow"><span class="chatName">${esc(c.title)}</span>${c.pinned?'<span class="soft">Pinned</span>':''}</span>
+      <span class="chatPreview">${esc(c.preview||c.username||'')}</span>
+    </span>
+    <span class="chatMeta"><span>${esc(shortTime(c.date))}</span>${c.unreadCount>0?`<span class="unreadBadge">${esc(c.unreadCount)}</span>`:''}</span>
+  </button>`).join('');
+}
+async function loadChats(silent=false){
+  const select=$('#chatAccountSelect');
+  if(!select || !select.value){
+    chatState={accountId:'',chats:[],activeRef:'',messages:[],oldestId:0,replyTo:0,loading:false};
+    renderChatList(); return;
+  }
+  chatState.accountId=select.value;
+  const q=$('#chatSearch')?.value.trim()||'';
+  if(!silent)$('#chatList').innerHTML='<div class="muted chatEmpty">Loading chats...</div>';
+  try{
+    const r=await api(`/api/accounts/${chatState.accountId}/chats?limit=120&q=${encodeURIComponent(q)}`);
+    chatState.chats=r.chats||[];
+    if(chatState.activeRef && !chatState.chats.some(c=>c.ref===chatState.activeRef)){
+      chatState.activeRef='';chatState.messages=[];chatState.oldestId=0;
+    }
+    renderChatList();
+    if(!chatState.activeRef && chatState.chats[0] && !silent)await openChat(chatState.chats[0].ref);
+  }catch(e){
+    const box=$('#chatList'); if(box)box.innerHTML=`<div class="muted chatEmpty">${esc(e.message)}</div>`;
+    if(!silent)toast(e.message);
+  }
+}
+async function openChat(ref){
+  chatState.activeRef=ref;chatState.messages=[];chatState.oldestId=0;clearReply();renderChatList();
+  const chat=chatState.chats.find(c=>c.ref===ref);
+  $('#conversationTitle').textContent=chat?.title||'Telegram Chat';
+  $('#conversationSub').textContent=chat?.username||'';
+  $('#messageList').innerHTML='<div class="muted chatEmpty">Loading messages...</div>';
+  await loadMessages(ref,false);
+  try{
+    await api(`/api/accounts/${chatState.accountId}/chats/${ref}/read`,{method:'POST',body:'{}'});
+    if(chat)chat.unreadCount=0;renderChatList();
+  }catch{}
+}
+function renderMessages(scrollBottom=false){
+  const box=$('#messageList');if(!box)return;
+  if(!chatState.messages.length){box.innerHTML='<div class="muted chatEmpty">No messages in this chat.</div>';return;}
+  box.innerHTML=chatState.messages.map(m=>`<div class="messageBubble ${m.outgoing?'out':''}" onclick="setReply(${m.id})">
+    ${!m.outgoing && m.sender?`<div class="messageSender">${esc(m.sender)}</div>`:''}
+    ${m.replyToMsgId?`<div class="replyTarget">Reply to #${esc(m.replyToMsgId)}</div>`:''}
+    <div class="messageText">${esc(m.text||'[Unsupported message]')}</div>
+    <div class="messageFooter">${m.edited?'<span>edited</span>':''}<span>${esc(shortTime(m.date))}</span></div>
+  </div>`).join('');
+  if(scrollBottom)box.scrollTop=box.scrollHeight;
+}
+async function loadMessages(ref=chatState.activeRef,silent=false){
+  if(!ref || !chatState.accountId || chatState.loading)return;
+  chatState.loading=true;
+  try{
+    const r=await api(`/api/accounts/${chatState.accountId}/chats/${ref}/messages?limit=60`);
+    if(ref!==chatState.activeRef)return;
+    chatState.messages=r.messages||[];chatState.oldestId=chatState.messages[0]?.id||0;
+    $('#loadOlderBtn').classList.toggle('hidden',!r.hasMore);renderMessages(!silent);
+  }catch(e){
+    if(e.message==='CHAT_LIST_EXPIRED_REFRESH_REQUIRED'){chatState.activeRef='';await loadChats();return;}
+    if(!silent){$('#messageList').innerHTML=`<div class="muted chatEmpty">${esc(e.message)}</div>`;toast(e.message);}
+  }finally{chatState.loading=false;}
+}
+async function loadOlderMessages(){
+  if(!chatState.activeRef || !chatState.oldestId || chatState.loading)return;
+  chatState.loading=true;const box=$('#messageList');const oldHeight=box.scrollHeight;
+  try{
+    const r=await api(`/api/accounts/${chatState.accountId}/chats/${chatState.activeRef}/messages?limit=60&offsetId=${chatState.oldestId}`);
+    const older=r.messages||[], seen=new Set(chatState.messages.map(m=>m.id));
+    chatState.messages=[...older.filter(m=>!seen.has(m.id)),...chatState.messages];
+    chatState.oldestId=chatState.messages[0]?.id||0;
+    $('#loadOlderBtn').classList.toggle('hidden',!r.hasMore);renderMessages(false);box.scrollTop=box.scrollHeight-oldHeight;
+  }catch(e){toast(e.message)}finally{chatState.loading=false;}
+}
+function setReply(id){
+  chatState.replyTo=Number(id)||0;if(!chatState.replyTo)return;
+  $('#replyMessageId').textContent=String(chatState.replyTo);$('#replyBar').classList.remove('hidden');$('#messageComposer').focus();
+}
+function clearReply(){
+  chatState.replyTo=0;const bar=$('#replyBar');if(bar)bar.classList.add('hidden');
+}
+async function sendChatMessage(){
+  if(!chatState.accountId || !chatState.activeRef){toast('Select a Telegram chat first');return;}
+  const input=$('#messageComposer'), text=input.value.trim();if(!text)return;input.disabled=true;
+  try{
+    const r=await api(`/api/accounts/${chatState.accountId}/chats/${chatState.activeRef}/messages`,{
+      method:'POST',body:JSON.stringify({text,replyTo:chatState.replyTo||null})
+    });
+    input.value='';clearReply();
+    if(r.message){chatState.messages.push(r.message);renderMessages(true);}
+    await loadChats(true);
+  }catch(e){toast(e.message)}finally{input.disabled=false;input.focus();}
+}
+function setupChatUi(){
+  const account=$('#chatAccountSelect'), search=$('#chatSearch'), composer=$('#messageComposer');
+  if(account)account.onchange=async()=>{chatState.accountId=account.value;chatState.activeRef='';chatState.messages=[];chatState.oldestId=0;await loadChats();};
+  if(search){let timer=null;search.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>loadChats(),300);};}
+  if(composer)composer.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChatMessage();}};
+}
 async function health(id){
   try{
     await api(`/api/accounts/${id}/health`,{method:'POST'});
@@ -449,12 +594,14 @@ async function clearCodes(){
 
 $('#loginBtn').onclick=login;
 nav();
+setupChatUi();
 
 api('/api/me').then(async m=>{
   if(m.authenticated){
     $('#loginScreen').classList.add('hidden');
     $('#app').classList.remove('hidden');
     await start();
+    await loadChats();
     await resumePendingTelegramAuth();
   }
 }).catch(()=>{});

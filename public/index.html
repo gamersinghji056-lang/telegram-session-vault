@@ -23,6 +23,7 @@
     <div class="brand"><div class="logo">TV</div><div><h1>Session Vault</h1><p>Telegram MTProto client</p></div></div>
     <div class="nav">
       <button class="active" data-target="dashboard">Dashboard</button>
+      <button data-target="chats">Chats</button>
       <button data-target="sessions">Sessions</button>
       <button data-target="devices">Telegram Devices</button>
       <button data-target="codes">Login Challenges</button>
@@ -49,6 +50,52 @@
       </div>
     </section>
 
+
+    <section id="chats" class="section">
+      <div class="topbar">
+        <div>
+          <h2>Telegram Chats</h2>
+          <p>Messages for the Telegram account explicitly connected to this vault.</p>
+        </div>
+      </div>
+
+      <div class="chatShell">
+        <aside class="chatListPane">
+          <div class="chatToolbar">
+            <select id="chatAccountSelect"></select>
+            <input id="chatSearch" placeholder="Search chats">
+            <button class="btn primary" onclick="loadChats()">Refresh</button>
+          </div>
+          <div id="chatList" class="chatList">
+            <div class="muted chatEmpty">Select an ACTIVE Telegram account.</div>
+          </div>
+        </aside>
+
+        <section class="conversationPane">
+          <div id="conversationHeader" class="conversationHeader">
+            <div>
+              <b id="conversationTitle">Select a chat</b>
+              <div id="conversationSub" class="muted"></div>
+            </div>
+            <button id="loadOlderBtn" class="btn ghost hidden" onclick="loadOlderMessages()">Older</button>
+          </div>
+
+          <div id="messageList" class="messageList">
+            <div class="muted chatEmpty">Choose a conversation from the left.</div>
+          </div>
+
+          <div id="replyBar" class="replyBar hidden">
+            <span>Replying to message <b id="replyMessageId"></b></span>
+            <button class="btn ghost" onclick="clearReply()">Cancel</button>
+          </div>
+
+          <div class="composer">
+            <textarea id="messageComposer" rows="2" maxlength="4096" placeholder="Write a message..."></textarea>
+            <button class="btn primary" onclick="sendChatMessage()">Send</button>
+          </div>
+        </section>
+      </div>
+    </section>
     <section id="sessions" class="section">
       <div class="topbar"><div><h2>Encrypted Session Vault</h2><p>Authorized Telegram sessions are encrypted server-side and never returned to the browser.</p></div><button class="btn primary" onclick="openAdd()">+ Connect Telegram</button></div>
       <div id="sessionCards" class="grid"></div>
