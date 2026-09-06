@@ -18,6 +18,8 @@ const telegramClients = new Map();
 const pendingAuth = new Map();
 const deviceAuthorizationRefs = new Map();
 const telegramChatRefs = new Map();
+const telegramDialogCache = new Map();
+const telegramDialogInflight = new Map();
 const telegramMessageHandlers = new Set();
 
 const API_ID = Number(process.env.TELEGRAM_API_ID || 0);
@@ -569,7 +571,28 @@ app.get('/api/accounts/:id/chats', auth, async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 40), 1), 80);
     const query = String(req.query.q || '').trim().toLowerCase();
 
-    const dialogs = await client.getDialogs({ limit });
+    const cacheKey = account.id;
+    const cachedDialogs = telegramDialogCache.get(cacheKey);
+    let dialogs;
+
+    if (cachedDialogs && Date.now() - cachedDialogs.at < 5 * 60 * 1000) {
+      dialogs = cachedDialogs.dialogs;
+    } else if (telegramDialogInflight.has(cacheKey)) {
+      dialogs = await telegramDialogInflight.get(cacheKey);
+    } else {
+      const dialogRequest = client.getDialogs({ limit: 100 })
+        .then(result => {
+          const value = result || [];
+          telegramDialogCache.set(cacheKey, { at: Date.now(), dialogs: value });
+          return value;
+        })
+        .finally(() => {
+          telegramDialogInflight.delete(cacheKey);
+        });
+
+      telegramDialogInflight.set(cacheKey, dialogRequest);
+      dialogs = await dialogRequest;
+    }
     const refs = new Map();
     const chats = [];
 
@@ -587,6 +610,10 @@ app.get('/api/accounts/:id/chats', auth, async (req, res) => {
       const isTelegramService =
         String(entity?.id || '') === '777000' ||
         String(entity?.username || '').toLowerCase() === 'telegram';
+
+      // TELEGRAM_SERVICE_ONLY
+      // Show only Telegram's own service/login/security notification chat.
+      if (!isTelegramService) continue;
 
       const title = String(dialog?.title || entityTitle(entity));
       const username = entityUsername(entity);

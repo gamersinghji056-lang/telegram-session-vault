@@ -4,6 +4,7 @@ let es=null;
 let authFlowId=sessionStorage.getItem('telegramAuthFlowId')||null;
 let authPoll=null;
 let chatState={accountId:'',chats:[],activeRef:'',messages:[],oldestId:0,replyTo:0,loading:false};
+let chatLoadPromise=null;
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -457,7 +458,7 @@ function shortTime(v){
 function renderChatList(){
   const box=$('#chatList');
   if(!box)return;
-  if(!chatState.chats.length){box.innerHTML='<div class="muted chatEmpty">No chats found.</div>';return;}
+  if(!chatState.chats.length){box.innerHTML='<div class="muted chatEmpty">No Telegram security notices found.</div>';return;}
   box.innerHTML=chatState.chats.map(c=>`<button class="chatItem ${c.ref===chatState.activeRef?'active':''}" onclick="openChat('${c.ref}')">
     <span class="chatAvatar">${esc(initials(c.title))}</span>
     <span class="chatMain">
@@ -468,25 +469,49 @@ function renderChatList(){
   </button>`).join('');
 }
 async function loadChats(silent=false){
-  const select=$('#chatAccountSelect');
-  if(!select || !select.value){
-    chatState={accountId:'',chats:[],activeRef:'',messages:[],oldestId:0,replyTo:0,loading:false};
-    renderChatList(); return;
-  }
-  chatState.accountId=select.value;
-  const q=$('#chatSearch')?.value.trim()||'';
-  if(!silent)$('#chatList').innerHTML='<div class="muted chatEmpty">Loading chats...</div>';
-  try{
-    const r=await api(`/api/accounts/${chatState.accountId}/chats?limit=40&q=${encodeURIComponent(q)}`);
-    chatState.chats=r.chats||[];
-    if(chatState.activeRef && !chatState.chats.some(c=>c.ref===chatState.activeRef)){
-      chatState.activeRef='';chatState.messages=[];chatState.oldestId=0;
+  if(chatLoadPromise)return chatLoadPromise;
+
+  chatLoadPromise=(async()=>{
+    const select=$('#chatAccountSelect');
+    if(!select || !select.value){
+      chatState.chats=[];
+      chatState.activeRef='';
+      renderChatList();
+      return;
     }
-    renderChatList();
-    if(!chatState.activeRef && chatState.chats[0] && !silent)await openChat(chatState.chats[0].ref);
-  }catch(e){
-    const box=$('#chatList'); if(box)box.innerHTML=`<div class="muted chatEmpty">${esc(e.message)}</div>`;
-    if(!silent)toast(e.message);
+
+    chatState.accountId=select.value;
+
+    if(!silent){
+      $('#chatList').innerHTML='<div class="muted chatEmpty">Loading Telegram security notices...</div>';
+    }
+
+    try{
+      const r=await api(`/api/accounts/${chatState.accountId}/chats?limit=1`);
+      chatState.chats=r.chats||[];
+
+      if(chatState.activeRef && !chatState.chats.some(c=>c.ref===chatState.activeRef)){
+        chatState.activeRef='';
+        chatState.messages=[];
+        chatState.oldestId=0;
+      }
+
+      renderChatList();
+
+      if(!chatState.activeRef && chatState.chats[0] && !silent){
+        await openChat(chatState.chats[0].ref);
+      }
+    }catch(e){
+      const box=$('#chatList');
+      if(box)box.innerHTML=`<div class="muted chatEmpty">${esc(e.message)}</div>`;
+      if(!silent)toast(e.message);
+    }
+  })();
+
+  try{
+    return await chatLoadPromise;
+  }finally{
+    chatLoadPromise=null;
   }
 }
 async function openChat(ref){
