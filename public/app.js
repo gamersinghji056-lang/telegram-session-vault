@@ -1,7 +1,7 @@
 let state={accounts:[],codes:[],audit:[]};
 let config={telegramConfigured:false};
 let es=null;
-let authFlowId=null;
+let authFlowId=sessionStorage.getItem('telegramAuthFlowId')||null;
 let authPoll=null;
 
 const $=s=>document.querySelector(s);
@@ -42,6 +42,7 @@ function tag(s){
 }
 
 function dt(v){
+  if(!v)return 'Unknown';
   try{return new Date(v).toLocaleString()}catch{return v}
 }
 
@@ -56,6 +57,14 @@ function render(){
   $('#mAccounts').textContent=state.accounts.length;
   $('#mHealthy').textContent=healthy;
   $('#mReauth').textContent=reauth;
+
+  const deviceSelect=$('#deviceAccountSelect');
+  if(deviceSelect){
+    const previous=deviceSelect.value;
+    const real=state.accounts.filter(a=>a.authMode==='REAL_TELEGRAM' && a.status==='ACTIVE');
+    deviceSelect.innerHTML=real.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} | ${esc(a.phone)}</option>`).join('');
+    if(real.some(a=>a.id===previous))deviceSelect.value=previous;
+  }
 
   const cn=$('#configNotice');
   if(!config.telegramConfigured){
@@ -125,6 +134,7 @@ async function login(){
     $('#loginScreen').classList.add('hidden');
     $('#app').classList.remove('hidden');
     await start();
+    await resumePendingTelegramAuth();
   }catch(e){toast(e.message)}
 }
 
@@ -144,7 +154,6 @@ async function start(){
 function resetAuthModal(){
   clearInterval(authPoll);
   authPoll=null;
-  authFlowId=null;
   $('#authStartStep').classList.remove('hidden');
   $('#authCodeStep').classList.add('hidden');
   $('#authPasswordStep').classList.add('hidden');
@@ -158,7 +167,12 @@ function resetAuthModal(){
 }
 
 function openAdd(prefill=null){
+  clearInterval(authPoll);
+  authPoll=null;
+  authFlowId=null;
+  sessionStorage.removeItem('telegramAuthFlowId');
   resetAuthModal();
+
   if(prefill){
     $('#fName').value=prefill.name||'';
     $('#fPhone').value=prefill.phone||'';
@@ -172,13 +186,16 @@ async function closeAdd(){
   if(authFlowId){
     try{await api(`/api/telegram/auth/${authFlowId}/cancel`,{method:'POST',body:'{}'})}catch{}
   }
+  sessionStorage.removeItem('telegramAuthFlowId');
+  authFlowId=null;
   resetAuthModal();
   $('#addModal').classList.add('hidden');
 }
 
 async function startTelegramAuth(){
   try{
-    if(!config.telegramConfigured) throw new Error('TELEGRAM_CONFIG_REQUIRED');
+    if(!config.telegramConfigured)throw new Error('TELEGRAM_CONFIG_REQUIRED');
+
     const payload={
       name:$('#fName').value,
       phone:$('#fPhone').value.replace(/\s+/g,''),
@@ -186,12 +203,16 @@ async function startTelegramAuth(){
       region:$('#fRegion').value,
       consent:true
     };
+
     const r=await api('/api/telegram/auth/start',{method:'POST',body:JSON.stringify(payload)});
     authFlowId=r.authId;
+    sessionStorage.setItem('telegramAuthFlowId',authFlowId);
+
     $('#authStartStep').classList.add('hidden');
     $('#sendCodeBtn').classList.add('hidden');
     $('#authProgressStep').classList.remove('hidden');
     $('#authStageText').textContent=r.stage;
+
     authPoll=setInterval(pollAuth,800);
     await pollAuth();
   }catch(e){toast(e.message)}
@@ -199,6 +220,7 @@ async function startTelegramAuth(){
 
 async function pollAuth(){
   if(!authFlowId)return;
+
   try{
     const s=await api(`/api/telegram/auth/${authFlowId}/status`);
     $('#authStageText').textContent=s.stage;
@@ -225,6 +247,7 @@ async function pollAuth(){
     }else if(s.stage==='AUTHORIZED'){
       clearInterval(authPoll);
       authPoll=null;
+      sessionStorage.removeItem('telegramAuthFlowId');
       authFlowId=null;
       $('#addModal').classList.add('hidden');
       resetAuthModal();
@@ -240,6 +263,16 @@ async function pollAuth(){
   }catch(e){
     clearInterval(authPoll);
     authPoll=null;
+
+    if(e.message==='AUTH_FLOW_NOT_FOUND'){
+      sessionStorage.removeItem('telegramAuthFlowId');
+      authFlowId=null;
+      $('#addModal').classList.add('hidden');
+      resetAuthModal();
+      toast('Login challenge expired. Start Telegram login again.');
+      return;
+    }
+
     $('#authErrorText').textContent=e.message;
     toast(e.message);
   }
@@ -252,6 +285,7 @@ async function submitTelegramCode(){
     $('#authCodeStep').classList.add('hidden');
     $('#submitCodeBtn').classList.add('hidden');
     $('#authProgressStep').classList.remove('hidden');
+    $('#authStageText').textContent='PROCESSING';
     await pollAuth();
   }catch(e){toast(e.message)}
 }
@@ -264,7 +298,83 @@ async function submitTelegramPassword(){
     $('#authPasswordStep').classList.add('hidden');
     $('#submitPasswordBtn').classList.add('hidden');
     $('#authProgressStep').classList.remove('hidden');
+    $('#authStageText').textContent='PROCESSING';
     await pollAuth();
+  }catch(e){toast(e.message)}
+}
+
+async function resumePendingTelegramAuth(){
+  const saved=sessionStorage.getItem('telegramAuthFlowId');
+  if(!saved)return;
+
+  authFlowId=saved;
+
+  try{
+    const s=await api(`/api/telegram/auth/${authFlowId}/status`);
+    $('#addModal').classList.remove('hidden');
+    $('#authStartStep').classList.add('hidden');
+    $('#sendCodeBtn').classList.add('hidden');
+    $('#authProgressStep').classList.remove('hidden');
+    $('#authStageText').textContent=s.stage;
+    authPoll=setInterval(pollAuth,800);
+    await pollAuth();
+  }catch(e){
+    if(e.message==='AUTH_FLOW_NOT_FOUND'){
+      sessionStorage.removeItem('telegramAuthFlowId');
+      authFlowId=null;
+    }else{
+      toast(e.message);
+    }
+  }
+}
+
+async function loadTelegramDevices(){
+  const select=$('#deviceAccountSelect');
+  const rows=$('#telegramDeviceRows');
+  const summary=$('#deviceSummary');
+
+  if(!select||!select.value){
+    rows.innerHTML='<tr><td colspan="7" class="muted">No ACTIVE real Telegram account available.</td></tr>';
+    summary.textContent='';
+    return;
+  }
+
+  rows.innerHTML='<tr><td colspan="7" class="muted">Loading Telegram authorized devices...</td></tr>';
+  summary.textContent='';
+
+  try{
+    const r=await api(`/api/accounts/${select.value}/telegram-devices`);
+    summary.textContent=`Telegram reports ${r.devices.length} authorized session${r.devices.length===1?'':'s'} for this account.`;
+
+    rows.innerHTML=r.devices.map(d=>`<tr>
+      <td><b>${esc(d.deviceModel)}</b><br><span class="muted">${esc([d.platform,d.systemVersion].filter(Boolean).join(' '))}</span></td>
+      <td>${esc([d.appName,d.appVersion].filter(Boolean).join(' '))}${d.officialApp?'<br><span class="soft">Official app</span>':''}</td>
+      <td>${esc([d.country,d.region].filter(Boolean).join(' / ')||'Unknown')}</td>
+      <td>${esc(d.ip||'Unknown')}</td>
+      <td>${esc(dt(d.dateActive))}</td>
+      <td>${d.current?'<span class="tag green">CURRENT</span>':'<span class="soft">Authorized</span>'}</td>
+      <td>${d.current
+        ? '<span class="muted">Current vault session</span>'
+        : `<button class="btn danger" onclick="terminateTelegramDevice('${esc(select.value)}','${esc(d.ref)}','${esc(d.deviceModel)}')">Terminate</button>`
+      }</td>
+    </tr>`).join('')||'<tr><td colspan="7" class="muted">Telegram returned no authorized sessions.</td></tr>';
+  }catch(e){
+    rows.innerHTML=`<tr><td colspan="7" class="muted">${esc(e.message)}</td></tr>`;
+    toast(e.message);
+  }
+}
+
+async function terminateTelegramDevice(accountId,ref,deviceName){
+  if(!confirm(`Terminate Telegram session on "${deviceName}"? That device will need to log in again.`))return;
+
+  try{
+    await api(`/api/accounts/${accountId}/telegram-devices/${ref}/terminate`,{
+      method:'POST',
+      body:'{}'
+    });
+    toast('Telegram device session terminated');
+    await loadTelegramDevices();
+    await load();
   }catch(e){toast(e.message)}
 }
 
@@ -305,10 +415,12 @@ async function clearCodes(){
 
 $('#loginBtn').onclick=login;
 nav();
+
 api('/api/me').then(async m=>{
   if(m.authenticated){
     $('#loginScreen').classList.add('hidden');
     $('#app').classList.remove('hidden');
     await start();
+    await resumePendingTelegramAuth();
   }
 }).catch(()=>{});

@@ -15,6 +15,7 @@ const store = new JsonStore(DATA_FILE);
 const clients = new Set();
 const telegramClients = new Map();
 const pendingAuth = new Map();
+const deviceAuthorizationRefs = new Map();
 
 const API_ID = Number(process.env.TELEGRAM_API_ID || 0);
 const API_HASH = String(process.env.TELEGRAM_API_HASH || '');
@@ -307,7 +308,7 @@ app.post('/api/telegram/auth/start', auth, async (req, res) => {
             flow.error = safeError(err);
             flow.updatedAt = new Date().toISOString();
           }
-        }), 45000, 'TELEGRAM_CONNECT_TIMEOUT');
+        }), 12 * 60 * 1000, 'TELEGRAM_AUTH_TIMEOUT');
 
         if (!await client.checkAuthorization()) {
           throw new Error('TELEGRAM_AUTH_NOT_AUTHORIZED');
@@ -432,6 +433,91 @@ app.post('/api/telegram/auth/:id/cancel', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+
+// Telegram authorized-device management.
+// Only works after this vault has been explicitly authorized by the account owner.
+// Raw Telegram authorization hashes never leave the server.
+app.get('/api/accounts/:id/telegram-devices', auth, async (req, res) => {
+  try {
+    const account = store.read().accounts.find(a => a.id === req.params.id);
+    if (!account) return res.status(404).json({ error: 'ACCOUNT_NOT_FOUND' });
+    if (account.authMode !== 'REAL_TELEGRAM') {
+      return res.status(409).json({ error: 'REAL_TELEGRAM_SESSION_REQUIRED' });
+    }
+
+    const client = await restoreTelegramClient(account);
+    if (!client) return res.status(409).json({ error: 'REAUTH_REQUIRED' });
+
+    const result = await client.api.getAuthorizations();
+    const refs = new Map();
+
+    const devices = (result?.authorizations || []).map((a) => {
+      const ref = crypto.randomUUID();
+      refs.set(ref, a.hash);
+
+      return {
+        ref,
+        current: !!a.current,
+        officialApp: !!a.officialApp,
+        passwordPending: !!a.passwordPending,
+        deviceModel: String(a.deviceModel || 'Unknown device'),
+        platform: String(a.platform || ''),
+        systemVersion: String(a.systemVersion || ''),
+        appName: String(a.appName || ''),
+        appVersion: String(a.appVersion || ''),
+        ip: String(a.ip || ''),
+        country: String(a.country || ''),
+        region: String(a.region || ''),
+        dateCreated: a.dateCreated ? new Date(Number(a.dateCreated) * 1000).toISOString() : null,
+        dateActive: a.dateActive ? new Date(Number(a.dateActive) * 1000).toISOString() : null
+      };
+    });
+
+    deviceAuthorizationRefs.set(account.id, {
+      createdAt: Date.now(),
+      refs
+    });
+
+    res.json({ accountId: account.id, devices });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
+app.post('/api/accounts/:id/telegram-devices/:ref/terminate', auth, async (req, res) => {
+  try {
+    const account = store.read().accounts.find(a => a.id === req.params.id);
+    if (!account) return res.status(404).json({ error: 'ACCOUNT_NOT_FOUND' });
+    if (account.authMode !== 'REAL_TELEGRAM') {
+      return res.status(409).json({ error: 'REAL_TELEGRAM_SESSION_REQUIRED' });
+    }
+
+    const cached = deviceAuthorizationRefs.get(account.id);
+    if (!cached || Date.now() - cached.createdAt > 5 * 60 * 1000) {
+      return res.status(409).json({ error: 'DEVICE_LIST_EXPIRED_REFRESH_REQUIRED' });
+    }
+
+    const hash = cached.refs.get(req.params.ref);
+    if (hash === undefined) return res.status(404).json({ error: 'DEVICE_NOT_FOUND_REFRESH_REQUIRED' });
+
+    const client = await restoreTelegramClient(account);
+    if (!client) return res.status(409).json({ error: 'REAUTH_REQUIRED' });
+
+    // Telegram itself enforces what can/cannot be terminated.
+    await client.api.resetAuthorization({ hash });
+
+    deviceAuthorizationRefs.delete(account.id);
+    store.update(state => {
+      const found = state.accounts.find(a => a.id === account.id);
+      audit(state, 'Telegram device terminated', `${found?.name || 'Account'}: an authorized Telegram device session was terminated by the account owner.`);
+      return state;
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
 // Legacy demo profile route kept for existing test data / compatibility.
 app.post('/api/accounts', auth, (req, res) => {
   const b = req.body || {};
