@@ -1,20 +1,21 @@
 {
-  "name": "telegram-session-vault-safe-demo",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Railway-ready safe demo for consent-based Telegram session persistence architecture",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "NODE_ENV=development node server.js"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "express": "^5.1.0",
-    "express-session": "^1.18.1",
-    "helmet": "^8.1.0",
-    "teleproto": "^1.229.0"
-  }
+    "name":  "telegram-session-vault-safe-demo",
+    "version":  "1.0.0",
+    "private":  true,
+    "description":  "Railway-ready safe demo for consent-based Telegram session persistence architecture",
+    "main":  "server.js",
+    "scripts":  {
+                    "start":  "node server.js",
+                    "dev":  "NODE_ENV=development node server.js",
+                    "agent":  "node agent/local-telegram-agent.js"
+                },
+    "engines":  {
+                    "node":  "\u003e=20"
+                },
+    "dependencies":  {
+                         "express":  "^5.1.0",
+                         "express-session":  "^1.18.1",
+                         "helmet":  "^8.1.0",
+                         "teleproto":  "^1.229.0"
+                     }
 }
